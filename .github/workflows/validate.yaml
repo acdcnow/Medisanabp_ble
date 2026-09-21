@@ -1,5 +1,6 @@
 name: Validate
 
+# HACS validation. GitHub disables workflows in forks: enable them once under Actions.
 on:
   push:
   pull_request:
@@ -11,7 +12,7 @@ jobs:
   validate-hacs:
     runs-on: "ubuntu-latest"
     steps:
-      - uses: "actions/checkout@v3"
+      - uses: "actions/checkout@v4"
       - name: HACS validation
         uses: "hacs/action@main"
         with:

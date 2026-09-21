@@ -1,14 +1,17 @@
 name: Validate with hassfest
 
+# GitHub disables workflows in forks: enable them once under Actions, then this one
+# can also be started manually (workflow_dispatch) in addition to push/PR/schedule.
 on:
   push:
   pull_request:
   schedule:
     - cron: "0 0 * * *"
+  workflow_dispatch:
 
 jobs:
   validate:
     runs-on: "ubuntu-latest"
     steps:
-      - uses: "actions/checkout@v3"
+      - uses: "actions/checkout@v4"
       - uses: home-assistant/actions/hassfest@master
