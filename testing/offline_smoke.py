@@ -1487,7 +1487,14 @@ def check_manifest() -> None:
         f"unexpected iot_class {manifest['iot_class']}",
     )
 
-    matcher_keys = {"connectable", "service_uuid", "service_data_uuid", "local_name", "manufacturer_id", "manufacturer_data_start"}
+    matcher_keys = {
+        "connectable",
+        "service_uuid",
+        "service_data_uuid",
+        "local_name",
+        "manufacturer_id",
+        "manufacturer_data_start",
+    }
     for entry in manifest["bluetooth"]:
         unknown = set(entry) - matcher_keys
         expect(not unknown, f"unsupported bluetooth matcher keys: {sorted(unknown)}")
@@ -1571,6 +1578,12 @@ def check_sources_and_docs() -> None:
         expect(name in readme, f"README must link {name}")
     expect("gitdiagram.com/acdcnow/Medisanabp_ble" in readme, "README must link the GitDiagram flow")
 
+    problems = _mermaid_problems()
+    expect(not problems, "Mermaid issues:\n     " + "\n     ".join(problems))
+
+
+def _mermaid_problems() -> list[str]:
+    """Return the GitHub-rendering problems found in the mermaid blocks of docs/."""
     problems: list[str] = []
     for path in sorted(DOCS_DIR.glob("*.md")):
         text = path.read_text(encoding="utf-8")
@@ -1585,7 +1598,7 @@ def check_sources_and_docs() -> None:
                     problems.append(
                         f"{path.name} block {index} line {line_no}: '->' in sequence text is re-parsed"
                     )
-    expect(not problems, "Mermaid issues:\n     " + "\n     ".join(problems))
+    return problems
 
 
 # ---------------------------------------------------------------------------
