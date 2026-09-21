@@ -22,3 +22,12 @@ Easiest install is via [HACS](https://hacs.xyz/):
 `HACS -> Explore & Add Repositories -> Medisana Blood Pressure BLE`
 
 The device will be autodiscovered once the data are received by any bluetooth proxy.
+
+## Documentation
+
+| Document | Content |
+| --- | --- |
+| [Architecture Concept Document](docs/Architecture-Concept-Document.md) | scope, context, architecture decisions, runtime view |
+| [System Design Document](docs/System-Design-Document.md) | data model, component and function reference, flows, extension guide |
+| [Home Assistant 2026.9 Compatibility Report](docs/Home-Assistant-2026.9-Compatibility-Report.md) | audit against core 2026.9.3, findings and fixes |
+| [GitDiagram](https://gitdiagram.com/acdcnow/Medisanabp_ble) | generated component graph of the default branch |

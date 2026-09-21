@@ -18,14 +18,17 @@ from homeassistant.const import Platform
 from homeassistant.core import CoreState, HomeAssistant
 
 from .medisana_bp import MedisanaBPBluetoothDeviceData, SensorUpdate
-from .const import DOMAIN
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 _LOGGER = logging.getLogger(__name__)
 
+type MedisanaBPConfigEntry = ConfigEntry[
+    ActiveBluetoothProcessorCoordinator[SensorUpdate]
+]
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+
+async def async_setup_entry(hass: HomeAssistant, entry: MedisanaBPConfigEntry) -> bool:
     """Set up MedisanaBP BLE device from a config entry."""
     address = entry.unique_id
     assert address is not None
@@ -65,9 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         return await data.async_poll(connectable_device)
 
-    coordinator = hass.data.setdefault(DOMAIN, {})[
-        entry.entry_id
-    ] = ActiveBluetoothProcessorCoordinator(
+    coordinator = ActiveBluetoothProcessorCoordinator(
         hass,
         _LOGGER,
         address=address,
@@ -80,6 +81,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # if we need to poll it
         connectable=False,
     )
+    entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(
         # only start after all platforms have had a chance to subscribe
@@ -88,9 +90,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: MedisanaBPConfigEntry) -> bool:
     """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
-
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from .medisana_bp import MedisanaBPSensor, SensorUpdate
+from datetime import datetime
 
-from homeassistant import config_entries
 from homeassistant.components.bluetooth.passive_update_processor import (
     PassiveBluetoothDataProcessor,
     PassiveBluetoothDataUpdate,
-    PassiveBluetoothProcessorCoordinator,
     PassiveBluetoothProcessorEntity,
 )
 from homeassistant.components.sensor import (
@@ -24,12 +22,12 @@ from homeassistant.const import (
     UnitOfPressure,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.sensor import sensor_device_info_to_hass_device_info
 
+from . import MedisanaBPConfigEntry
 from .device import device_key_to_bluetooth_entity_key
-from .const import DOMAIN
-
+from .medisana_bp import MedisanaBPSensor, SensorUpdate
 
 
 SENSOR_DESCRIPTIONS: dict[str, SensorEntityDescription] = {
@@ -102,13 +100,11 @@ def sensor_update_to_bluetooth_data_update(
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: config_entries.ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: MedisanaBPConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the MedisanaBP BLE sensors."""
-    coordinator: PassiveBluetoothProcessorCoordinator = hass.data[DOMAIN][
-        entry.entry_id
-    ]
+    coordinator = entry.runtime_data
     processor = PassiveBluetoothDataProcessor(sensor_update_to_bluetooth_data_update)
     entry.async_on_unload(
         processor.async_add_entities_listener(
@@ -127,7 +123,7 @@ class MedisanaBPBluetoothSensorEntity(
     """Representation of a MedisanaBP sensor."""
 
     @property
-    def native_value(self) -> str | int | None:
+    def native_value(self) -> datetime | float | int | str | None:
         """Return the native value."""
         return self.processor.entity_data.get(self.entity_key)
 

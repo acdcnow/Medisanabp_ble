@@ -1,24 +1,26 @@
 from __future__ import annotations
 
-import logging
 import asyncio
 from datetime import datetime, timezone
+import logging
+from typing import Any
 
 from bleak import BLEDevice
+from bleak.exc import BleakError
 from bleak_retry_connector import (
     BleakClientWithServiceCache,
     establish_connection,
-    retry_bluetooth_connection_error,
 )
 from bluetooth_data_tools import short_address
 from bluetooth_sensor_state_data import BluetoothData
-from home_assistant_bluetooth import BluetoothServiceInfo
+from habluetooth import BluetoothServiceInfo
 from sensor_state_data import SensorDeviceClass, SensorUpdate, Units
 from sensor_state_data.enum import StrEnum
 
 from .const import (
-    CHARACTERISTIC_BLOOD_PRESSURE,
     CHARACTERISTIC_BATTERY,
+    CHARACTERISTIC_BLOOD_PRESSURE,
+    NOTIFICATION_TIMEOUT,
     UPDATE_INTERVAL,
 )
 
@@ -47,7 +49,10 @@ class MedisanaBPBluetoothDeviceData(BluetoothData):
         _LOGGER.debug("Parsing MedisanaBP BLE advertisement data: %s", service_info)
         self.set_device_manufacturer("Medisana")
         self.set_device_type("Blood Pressure Measurement")
-        name = f"{service_info.name} {short_address(service_info.address)}"
+        name = (
+            f"{service_info.name or 'Medisana BP'} "
+            f"{short_address(service_info.address)}"
+        )
         self.set_device_name(name)
         self.set_title(name)
 
@@ -57,12 +62,21 @@ class MedisanaBPBluetoothDeviceData(BluetoothData):
         """
         This is called every time we get a service_info for a device. It means the
         device is working and online.
+
+        ``last_poll`` is the number of seconds since the last poll attempt, or
+        None if the device has never been polled since startup.
         """
         return not last_poll or last_poll > UPDATE_INTERVAL
 
-    @retry_bluetooth_connection_error()
-    def notification_handler(self, _, data) -> None:
-        """Helper for command events"""
+    def notification_handler(self, _sender: Any, data: bytearray) -> None:
+        """Handle a blood pressure measurement notification.
+
+        Called from the Bluetooth stack, so it must not raise.
+        """
+        if len(data) < 16:
+            _LOGGER.warning("Unexpected blood pressure payload: %s", data)
+            return
+
         syst = data[2] * 256 + data[1]
         diast = data[4] * 256 + data[3]
         arter = data[6] * 256 + data[5]
@@ -72,23 +86,30 @@ class MedisanaBPBluetoothDeviceData(BluetoothData):
         dhour = data[11]
         dminu = data[12]
         puls = data[15] * 256 + data[14]
-        user = data[16]
         try:
-            datetime_str = f"{dyear}/{dmonth}/{dday} {dhour}:{dminu:0>2}"
-            date = datetime.strptime(datetime_str, '%Y/%m/%d %H:%M')
-            local_timezone = datetime.now(timezone.utc).astimezone().tzinfo
+            date = datetime.strptime(
+                f"{dyear}/{dmonth}/{dday} {dhour}:{dminu:0>2}", "%Y/%m/%d %H:%M"
+            )
+            # The device does not know about timezones, so the measured
+            # date is handed to Home Assistant in the local timezone.
             self.update_sensor(
                 key=str(MedisanaBPSensor.TIMESTAMP),
                 native_unit_of_measurement=None,
-                native_value=date.replace(tzinfo=local_timezone),
+                native_value=date.replace(
+                    tzinfo=datetime.now(timezone.utc).astimezone().tzinfo
+                ),
                 name="Measured Date",
             )
-        except:
-            _LOGGER.error("Can't add Measured Date")
+        except (TypeError, ValueError):
+            _LOGGER.warning("Can't add Measured Date from %s", data)
 
         _LOGGER.info(
-            "Got data from BPM device (syst: %s, diast: %s, puls: %s)",
-            syst, diast, puls)
+            "Got data from BPM device (syst: %s, diast: %s, pulse: %s, map: %s)",
+            syst,
+            diast,
+            puls,
+            arter,
+        )
 
         self.update_sensor(
             key=str(MedisanaBPSensor.SYSTOLIC),
@@ -113,23 +134,18 @@ class MedisanaBPBluetoothDeviceData(BluetoothData):
         self._event.set()
         return
 
-    async def async_poll(self, ble_device: BLEDevice) -> SensorUpdate:
-        """
-        Poll the device to retrieve any values we can't get from passive listening.
-        """
-        _LOGGER.debug("Connecting to BLE device: %s", ble_device.address)
-        client = await establish_connection(
-            BleakClientWithServiceCache, ble_device, ble_device.address
-        )
+    async def _async_read_battery(self, client: BleakClientWithServiceCache) -> None:
+        """Read the battery level, if the device exposes it."""
         try:
-            await client.start_notify(
-                CHARACTERISTIC_BLOOD_PRESSURE, self.notification_handler
-            )
-        except:
-            _LOGGER.warn("Notify Bleak error")
+            battery_char = client.services.get_characteristic(CHARACTERISTIC_BATTERY)
+            if battery_char is None:
+                _LOGGER.debug("Device has no battery characteristic")
+                return
+            battery_payload = await client.read_gatt_char(battery_char)
+        except (BleakError, EOFError) as err:
+            _LOGGER.warning("Could not read battery level: %s", err)
+            return
 
-        battery_char = client.services.get_characteristic(CHARACTERISTIC_BATTERY)
-        battery_payload = await client.read_gatt_char(battery_char)
         self.update_sensor(
             key=str(MedisanaBPSensor.BATTERY_PERCENT),
             native_unit_of_measurement=Units.PERCENTAGE,
@@ -138,15 +154,37 @@ class MedisanaBPBluetoothDeviceData(BluetoothData):
             name="Battery",
         )
 
-        # Wait to see if a callback comes in.
+    async def async_poll(self, ble_device: BLEDevice) -> SensorUpdate:
+        """
+        Poll the device to retrieve any values we can't get from passive listening.
+        """
+        _LOGGER.debug("Connecting to BLE device: %s", ble_device.address)
+        # Clear before subscribing: this poll may only complete early if *this*
+        # connection delivered a measurement, otherwise the values of the
+        # previous poll would be reported as the current ones.
+        self._event.clear()
+        client = await establish_connection(
+            BleakClientWithServiceCache, ble_device, ble_device.address
+        )
         try:
-            await asyncio.wait_for(self._event.wait(), 15)
-        except asyncio.TimeoutError:
-            _LOGGER.warn("Timeout getting command data.")
-        except:
-            _LOGGER.warn("Wait For Bleak error")
+            await self._async_read_battery(client)
+            try:
+                await client.start_notify(
+                    CHARACTERISTIC_BLOOD_PRESSURE, self.notification_handler
+                )
+            except (BleakError, EOFError) as err:
+                _LOGGER.warning("Could not enable notifications: %s", err)
+            else:
+                # Wait to see if a callback comes in.
+                try:
+                    await asyncio.wait_for(self._event.wait(), NOTIFICATION_TIMEOUT)
+                except TimeoutError:
+                    _LOGGER.warning("Timeout getting measurement data")
         finally:
-            await client.stop_notify(CHARACTERISTIC_BLOOD_PRESSURE)
+            # Notifications stop on disconnect, so stop_notify() is not needed.
+            # The disconnect must happen even if reading the battery failed,
+            # otherwise the connection stays open and the device can no longer
+            # be reached.
             await client.disconnect()
             _LOGGER.debug("Disconnected from active bluetooth client")
         return self._finish_update()

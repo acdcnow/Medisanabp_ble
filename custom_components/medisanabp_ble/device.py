@@ -1,12 +1,12 @@
-"""Constants for MedisanaBP BLE."""
+"""Helpers to bridge the MedisanaBP parser keys to bluetooth entity keys."""
 
 from __future__ import annotations
-
-from .medisana_bp import DeviceKey
 
 from homeassistant.components.bluetooth.passive_update_processor import (
     PassiveBluetoothEntityKey,
 )
+
+from .medisana_bp import DeviceKey
 
 
 def device_key_to_bluetooth_entity_key(

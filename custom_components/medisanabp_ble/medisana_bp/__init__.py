@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from sensor_state_data import (
     BinarySensorDeviceClass,
-    BinarySensorValue,
     DeviceKey,
-    SensorDescription,
     SensorDeviceClass,
     SensorDeviceInfo,
     SensorUpdate,
