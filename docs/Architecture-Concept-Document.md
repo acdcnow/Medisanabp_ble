@@ -294,7 +294,10 @@ sequenceDiagram
 
 ## 9. Constraints
 
-* **Home Assistant 2026.9 / Python 3.14.** Verified against core tag `2026.9.3`. `__init__.py` uses a PEP 695 `type` alias, which requires Python ≥ 3.12 (HA 2026.9 ships 3.14).
+* **Home Assistant 2026.9 / Python 3.14.** Verified against core tag `2026.9.3`. The typed config entry
+  alias in `__init__.py` is a plain assignment rather than a PEP 695 `type` statement, so the package still
+  imports on Python 3.11 — that is what makes `testing/offline_smoke.py` runnable on a developer machine.
+  HA 2026.9 itself ships Python 3.14.
 * **Pinned BLE stack.** Core pins `bleak==3.0.2`, `bleak-retry-connector==4.7.0`, `habluetooth==6.26.11`, `bluetooth-data-tools==1.29.24`. The parser must stay compatible with those. In bleak 3.0 a coroutine callback is scheduled as a task by `start_notify`, while a plain function is called inline – the integration deliberately uses the inline form (see report F4).
 * **Device behaviour.** The monitor offers a single measurement frame per connection and is otherwise silent; nothing can be requested on demand.
 * **Vendored parser.** The parser cannot be updated independently of the integration version.
@@ -311,7 +314,7 @@ sequenceDiagram
 | R-3 | Poll cadence of 10 s while the device advertises | extra BLE connect/disconnect cycles | add a "measurement already seen" guard (open) |
 | R-4 | `SENSOR_DESCRIPTIONS[key]` is a hard lookup | an unknown key from a future library marks the whole update as failed | keep as fail-loud, or `.get()` + log (open) |
 | R-5 | Fork metadata still points upstream (`documentation`, `issue_tracker`, `codeowners`) | user reports land upstream | decide the fork's policy (open) |
-| R-6 | No tests | regressions only found on hardware | offline smoke test with stubbed HA modules or a recorded frame fixture (open) |
+| R-6 | No hardware-free end-to-end test | transport regressions only surface on a device | `testing/offline_smoke.py` covers parser, wiring, config flow and metadata (20 checks); a captured advertisement/notification fixture is still open |
 | R-7 | MAP value (`data[6]`), user id (`data[16]`) and seconds (`data[13]`) are decoded/ignored | missing clinically relevant data | expose MAP as a sensor (open) |
 
 ---
@@ -330,3 +333,4 @@ sequenceDiagram
 | AD-8 | `translations/en.json` | `helpers/translation.py` loader, `loader.py:Integration.has_translations` |
 | AD-9 | `parser.py:notification_handler` | manual reasoning, open item R-2 |
 | AD-10 | `manifest.json` | `components/eufylife_ble/manifest.json`, `components/tilt_ble/manifest.json` |
+| AD-4, AD-5, AD-6 | `parser.py`, `__init__.py`, `sensor.py` | `testing/offline_smoke.py`: poll lifecycle and disconnect guarantees on every error path, one wait per poll, coordinator keyword contract, entity mapping |

@@ -62,7 +62,7 @@ Severity: **Blocker** = cannot load, **High** = wrong data or resource leak, **M
 | F4 | **High** | Two problems in one flow: (a) the battery read happened *before* `start_notify`, so a slow or failing read delayed the subscription and the monitor's answer could arrive outside the 15 s window; (b) `notification_handler` was decorated with `@retry_bluetooth_connection_error()` although it is a synchronous callback — under bleak 3.0 the decorator turns it into a coroutine function, which bleak schedules as a **detached task**, decoupling the callback from the connection and making the "retry a BLE connection error" semantics meaningless. | `bleak/__init__.py` v3.0.2 `start_notify` (`inspect.iscoroutinefunction`) and `bleak_retry_connector.retry_bluetooth_connection_error` (`async def` wrapper) | **Fixed**: battery read first, then subscribe, then wait; decorator removed → the handler is a plain sync callable invoked inline. |
 | F5 | **Medium** | Three bare `except:` clauses (date parsing, `start_notify`, the notification wait) plus deprecated `_LOGGER.warn`. Bare `except:` catches `BaseException`, including `asyncio.CancelledError`, so a reload/shutdown during a poll could be swallowed; it also hid real errors behind "Notify Bleak error". | `medisana_bp/parser.py` (pre-audit) | **Fixed**: `except (BleakError, EOFError)` / `except TimeoutError` / `except (TypeError, ValueError)`, `_LOGGER.warning`. |
 | F6 | **Medium** | No `translations/` directory. HA loads only `<component>/translations/<language>.json` (`helpers/translation.py:_async_get_component_strings`) and `Integration.has_translations` is literally "a `translations` directory exists" (`loader.py`) — for custom integrations `strings.json` is not read at runtime (core's hassfest/pylint helpers say so explicitly: "core integrations use strings.json, custom integrations use translations/en.json"). The config flow therefore rendered no translated labels. | `homeassistant/helpers/translation.py`, `homeassistant/loader.py`, `script/hassfest/services.py` | **Fixed**: `translations/en.json` added (same content as `strings.json`). |
-| F7 | **Low** | Coordinator kept in `hass.data[DOMAIN][entry.entry_id]` (legacy since HA 2024.6) and `async_unload_entry` popped it only when the platform unload succeeded, leaving a stale key otherwise. | `__init__.py` (pre-audit) | **Fixed**: `entry.runtime_data` with a PEP 695 typed alias; unload is now a single platform unload. |
+| F7 | **Low** | Coordinator kept in `hass.data[DOMAIN][entry.entry_id]` (legacy since HA 2024.6) and `async_unload_entry` popped it only when the platform unload succeeded, leaving a stale key otherwise. | `__init__.py` (pre-audit) | **Fixed**: `entry.runtime_data` with a typed alias; unload is now a single platform unload. |
 | F8 | **Low** | Typing/modernisation: `FlowResult` (legacy alias) instead of `ConfigFlowResult`; `_async_current_ids()` used the default `include_ignore=True`, so a device the user had *ignored* was invisible in the manual picker (core's Bluetooth flows pass `include_ignore=False`); platform used `AddEntitiesCallback` instead of `AddConfigEntryEntitiesCallback`; `native_value` was annotated `str | int | None` although the date sensor returns a `datetime`. | `config_flow.py`, `sensor.py` (pre-audit) vs. core 2026.9.3 | **Fixed**. |
 | F9 | **Low** | `hacs.json` declared `"homeassistant": "2023.11.0"`, far below what the code needs (`runtime_data` ≥ 2024.6, `ConfigFlowResult` ≥ 2024.4, active Bluetooth coordinator ≥ 2023.12). HACS would have offered the integration to installations it cannot run on. | `hacs.json` | **Fixed**: `"2026.9.0"` (the audited version). |
 | F10 | **Info** | Dead code and tidies: unused imports `BinarySensorValue`/`SensorDescription` in `medisana_bp/__init__.py`; unused `user = data[16]`; unused `arter` (MAP) value; `device.py` documented itself as "Constants for MedisanaBP BLE"; import order inconsistent with HA's style; doubled blank lines. | static review | **Fixed** (MAP is now logged instead of discarded). |
@@ -84,11 +84,20 @@ custom_components/medisanabp_ble/medisana_bp/parser.py          disconnect guara
 custom_components/medisanabp_ble/medisana_bp/const.py           NOTIFICATION_TIMEOUT, comments
 custom_components/medisanabp_ble/medisana_bp/__init__.py        unused imports removed
 custom_components/medisanabp_ble/translations/en.json           NEW - the file HA actually loads
+custom_components/medisanabp_ble/brand/icon.png, icon@2x.png    NEW - required by HACS validation
+README.md                                                       features, HACS link, automation and troubleshooting sections
+CHANGELOG.md                                                    NEW - release history
 hacs.json                                                       homeassistant: 2026.9.0
 docs/Architecture-Concept-Document.md                           NEW
 docs/System-Design-Document.md                                  NEW
 docs/Home-Assistant-2026.9-Compatibility-Report.md              NEW (this file)
+testing/offline_smoke.py                                        NEW - 20 hardware-free behaviour and metadata checks
+testing/make_brand_assets.py                                    NEW - regenerates the brand icons dependency-free
 ```
+
+The smoke test paid for itself immediately: it flagged the `integration_type` key of this very release in
+second position of the manifest, where hassfest requires `domain`, `name` and then alphabetical order, and
+it proved the poll regressions F2/F3/F4 with a fake client.
 
 No entity identifier, unique ID or config entry format changed, so existing entities, statistics and automations survive the update.
 
@@ -103,7 +112,7 @@ No entity identifier, unique ID or config entry format changed, so existing enti
 | R-3 | Skip a poll when the last measurement is already known (or raise `UPDATE_INTERVAL`) | fewer BLE connect/disconnect cycles near the monitor |
 | R-4 | Make the key lookup in `sensor_update_to_bluetooth_data_update` tolerant (`SENSOR_DESCRIPTIONS.get` + skip) | a new key from a future library version currently fails the whole device update |
 | R-5 | Fork hygiene: point `documentation`/`issue_tracker` at the fork and adjust `codeowners` | user reports currently land upstream |
-| R-6 | Add parser tests: feed a captured `0x2A35` frame into `notification_handler` with a stubbed `SensorData`, and a recorded advertisement into `_start_update` | the defects F2–F5 were all invisible without a device |
+| R-6 | Add a captured-frame fixture (a real advertisement and `0x2A35` frame from the device) to `testing/offline_smoke.py` | the stubs verify the wiring and the error paths; the real frame layout is still only exercised on hardware |
 | R-7 | Expose MAP (`data[6]`), optionally the user id (`data[16]`) | clinically relevant value that is already decoded |
 | R-8 | Publish the vendored `medisana_bp` as a PyPI package and depend on it | the parser can then be updated without a new integration release |
 | R-9 | Add a diagnostics platform (`async_get_config_entry_diagnostics`) | one-click state dump for support cases |
@@ -113,15 +122,16 @@ No entity identifier, unique ID or config entry format changed, so existing enti
 ## 6. How to re-verify
 
 ```text
-1  hassfest / HACS validation: push the branch and watch .github/workflows/{hassfest,validate}.yaml
-2  syntax:                    python -m py_compile custom_components\medisanabp_ble\**\*.py   (Python >= 3.12)
-3  real HA:                    copy custom_components\medisanabp_ble into /config/custom_components,
-                              restart, confirm "Medisana Blood Pressure BLE" is discovered,
-                              watch for "Manifest ... requirements" messages and for
-                              "Could not read battery level" / "Timeout getting measurement data"
-4  measurement check:          put the monitor on the cuff, measure, and confirm
-                              sensor.<device>_systolic / _diastolic / _pulse / _measured_date update
-5  leak check:                 Settings -> Devices -> the monitor; after several polls the adapter must not
-                              report the device as connected while idle in `bluetoothctl info <address>`
-6  audit repeat:               on the next core release, re-diff the interfaces listed in section 2
+1  offline behaviour:         python testing\offline_smoke.py      (20 checks, Python >= 3.11, no HA/device)
+2  hassfest / HACS validation: push and watch .github/workflows/{hassfest,validate}.yaml
+3  syntax:                    python -m py_compile custom_components\medisanabp_ble\**\*.py
+4  real HA:                  copy custom_components\medisanabp_ble into /config/custom_components,
+                             restart, confirm "Medisana Blood Pressure BLE" is discovered, and watch for
+                             "Could not read battery level" / "Timeout getting measurement data"
+5  measurement check:        put the monitor on the cuff, measure, and confirm
+                             sensor.<device>_systolic / _diastolic / _pulse / _measured_date update
+6  leak check:               Settings -> Devices -> the monitor; after several polls the adapter must not
+                             report the device as connected while idle in `bluetoothctl info <address>`
+7  audit repeat:             on the next core release, re-diff the interfaces listed in section 2
 ```
+

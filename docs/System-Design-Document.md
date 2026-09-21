@@ -111,7 +111,7 @@ Responsibility: config entry lifecycle, coordinator construction, platform forwa
 | Symbol | Signature | Notes |
 | --- | --- | --- |
 | `PLATFORMS` | `list[Platform]` | `[Platform.SENSOR]` |
-| `MedisanaBPConfigEntry` | `type … = ConfigEntry[ActiveBluetoothProcessorCoordinator[SensorUpdate]]` | PEP 695 alias, needs Python ≥ 3.12 |
+| `MedisanaBPConfigEntry` | `ConfigEntry[ActiveBluetoothProcessorCoordinator[SensorUpdate]]` | plain alias instead of a PEP 695 `type` statement, so the package imports on Python 3.11 for the offline test |
 | `async_setup_entry` | `(hass, entry: MedisanaBPConfigEntry) -> bool` | builds `MedisanaBPBluetoothDeviceData`, the coordinator, stores it in `runtime_data`, forwards platforms, then `coordinator.async_start()` via `entry.async_on_unload` |
 | `_needs_poll` (closure) | `(service_info: BluetoothServiceInfoBleak, last_poll: float | None) -> bool` | `hass.state is CoreState.running` **and** `data.poll_needed(...)` **and** a connectable `BLEDevice` exists |
 | `_async_poll` (closure) | `(service_info) -> SensorUpdate` (coroutine) | picks `service_info.device` when connectable, else resolves one with `async_ble_device_from_address(..., True)`; raises `RuntimeError` when none is reachable |
@@ -262,7 +262,7 @@ Platform unload → listener/processor removal → coordinator stop via `async_o
 | --- | --- |
 | Config entry version | `1`; no `async_migrate_entry`. All the data lives in `unique_id`, so a version bump is only needed if entry data is introduced. |
 | HA minimum version | `hacs.json` demands 2026.9.0 (this branch is verified against core 2026.9.3). The code itself needs ≥ 2024.6 for `runtime_data`, ≥ 2024.4 for `ConfigFlowResult` and ≥ 2023.12 for the active Bluetooth coordinator. |
-| Python minimum | 3.12 (PEP 695 `type` alias in `__init__.py`); HA 2026.9 ships 3.14. |
+| Python minimum | 3.11 (plain type alias in `__init__.py`, so the package imports on a developer machine for the offline smoke test); HA 2026.9 ships 3.14. |
 | Entity historical continuity | Unique IDs are `{address}-{key}` and unchanged, so existing entities, statistics and automations survive the 1.4.0 update. |
 | Parser API | The vendored module is only consumed by this integration; no external importers are known. |
 | Restored state | HA's passive update processor storage restores devices/descriptions/values across restarts; the entity set therefore survives a restart even before the first advertisement arrives. |
@@ -271,14 +271,13 @@ Platform unload → listener/processor removal → coordinator stop via `async_o
 
 ## 10. Testing and validation
 
-| Level | What can be done today | Notes |
+| Level | How | Notes |
 | --- | --- | --- |
-| Metadata | hassfest + HACS GitHub Actions (`.github/workflows/*`) | run on every push; they cannot detect the missing requirements (F1) — see the report |
-| Syntax | `python -m py_compile custom_components/medisanabp_ble/**/*.py` | `__init__.py` needs Python ≥ 3.12 for the `type` alias |
-| Structural | compare the calls against the pinned library signatures (the checks in the report's interface table) | repeat on every HA release |
-| Parser logic | feed a captured `0x2A35` frame into `notification_handler` with a stubbed `SensorData` | no hardware needed; not implemented yet (open item R-6) |
-| Transport | feed a recorded advertisement through `_start_update` / `update` | idem |
-| End to end | real device: check `Settings → Devices`, then trigger a measurement and watch `sensor.*_systolic` | the only true acceptance test today |
+| Offline behaviour | `python testing/offline_smoke.py` (20 checks) | stubs Home Assistant, Bluetooth, bleak and `sensor_state_data`; covers advertisement and notification parsing (including short/malformed frames), the whole poll lifecycle with its error paths, the disconnect guarantees, the per-poll notification wait, the config flow, entity creation and the metadata rules |
+| Metadata | hassfest + HACS GitHub Actions (`.github/workflows/*`) | they validate the manifest and repository layout but cannot detect undeclared imports (F1) |
+| Syntax | `python -m py_compile custom_components/medisanabp_ble/**/*.py` | any Python ≥ 3.11 |
+| Structural | compare the calls against the pinned library signatures (report §2) | repeat on every HA release |
+| End to end | real device: `Settings → Devices`, then measure and watch `sensor.*_systolic` | the only true acceptance test of the BLE transport |
 
 ---
 
@@ -309,5 +308,5 @@ Publish `medisana_bp` (name it `medisana-bp` to match the `*-ble` ecosystem), de
 4. Polling repeats every `UPDATE_INTERVAL` of advertisement activity even when the measurement has not changed (R-3).
 5. `SENSOR_DESCRIPTIONS[key]` is a strict lookup: a key the library adds later would fail the whole update instead of being skipped (R-4).
 6. MAP, user id and seconds of the frame are not exposed (R-7).
-7. No automated parser tests and no diagnostics download (R-6).
+7. No diagnostics platform, and no captured advertisement/notification fixture: the offline smoke test proves the wiring and the error paths, not the real frame layout of a device (R-6).
 8. The fork still advertises the upstream repository as documentation and issue tracker (R-5).

@@ -23,9 +23,10 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 _LOGGER = logging.getLogger(__name__)
 
-type MedisanaBPConfigEntry = ConfigEntry[
-    ActiveBluetoothProcessorCoordinator[SensorUpdate]
-]
+# Plain alias instead of a PEP 695 ``type`` statement on purpose: it keeps the
+# package importable on Python 3.11 so the offline smoke test can run on any
+# development machine, and Home Assistant asks for Python 3.14 anyway.
+MedisanaBPConfigEntry = ConfigEntry[ActiveBluetoothProcessorCoordinator[SensorUpdate]]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: MedisanaBPConfigEntry) -> bool:
